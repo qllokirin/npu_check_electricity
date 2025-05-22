@@ -3,6 +3,8 @@ import asyncio
 import json
 import time
 import sys
+import requests
+from datetime import datetime
 from pathlib import Path
 
 url = "https://yktapp.nwpu.edu.cn/jfdt/charge/feeitem/getThirdData"
@@ -65,6 +67,44 @@ async def check_network():
         print(f"发生错误：{e}")
         return False
 
+
+def send_private_msg(msg, user_id):
+    headers = {
+        "Authorization": ""
+    }
+    data = {
+        "user_id": user_id,
+        "message": [
+            {
+                "type": "text",
+                "data": {
+                    "text": msg
+                }
+            }
+        ]
+    }
+    response = requests.post('http://127.0.0.1:3000/send_private_msg', headers=headers, json=data)
+    print(response.text)
+
+def send_msg(msg, group_id):
+    url = "http://127.0.0.1:3000/send_group_msg"
+    data = {
+        "group_id": group_id,
+        "message": [
+            {
+                "type": "text",
+                "data": {
+                    "text": msg
+                }
+            }
+        ]
+    }
+    headers = {
+        "Authorization": "",
+        "Content-Type": "application/json"
+    }
+    response = requests.post(url, json=data, headers=headers)
+    print(response.text)
 async def main():
     timeout_time = 120
     start_time = time.time()
@@ -85,41 +125,20 @@ async def main():
         exe_dir = Path(__file__).parent
     file_path = exe_dir / 'check_electricity.json'
     if file_path.exists():
-        print("配置文件已存在✅，开始重新绑定宿舍，绑定完后会覆盖配置文件")
+        print("配置文件已存在✅，正在读取配置文件，自动查询电量")
+        data = json.loads(file_path.read_text(encoding='utf-8'))
+        electric_left, information_all = await get_electric_left(data['campus'], data['building'], data['room'])
+        print("当前时间是：", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        print(f"当前剩余电量：{electric_left}，{information_all}")
+        with open(exe_dir / 'info.log', 'a', encoding='utf-8') as f:
+            f.write(f'{datetime.now().strftime("%Y-%m-%d %H:%M:%S")} {electric_left}，{information_all}\n')
+        if electric_left < data['warning_electric']:
+            print("电量不足，请及时充值")
+            if 'user_id' in data:
+                send_private_msg(f"电量不足，请及时充值，当前剩余电量：{electric_left}，{information_all}", data['user_id'])
+            if 'group_id' in data:
+                send_msg(f"电量不足，请及时充值，当前剩余电量：{electric_left}，{information_all}", data['group_id'])
     else:
-        print("配置文件不存在，开始绑定宿舍")
-    # 选择校区
-    msg, campus_all = await get_campus()
-    print(msg)
-    campus_msg = input("请输入后回车：")
-    # 选择楼栋
-    campus = campus_all[int(campus_msg)]['value']
-    msg, building_all = await get_building(campus)
-    print(msg)
-    building_msg = input("请输入后回车：")
-    # 选择房间
-    building = building_all[int(building_msg)]['value']
-    msg, room_all = await get_room(campus, building)
-    print(msg)
-    room_msg = input("请输入后回车：")
-    room = room_all[int(room_msg)]['value']
-    data = {'campus': campus, 'building': building, 'room': room}
-    electric_left, information_all = await get_electric_left(campus, building, room)
-    print(f"当前剩余电量：{electric_left}，{information_all}")
-    warning_electric = input("请输入电量预警值，直接回车设置为默认值10：")
-    if warning_electric == '':
-        warning_electric = 10
-    else:
-        warning_electric = int(warning_electric)
-    data = {
-        'campus': campus,
-        'building': building,
-        'room': room,
-        'warning_electric': warning_electric
-    }
-    with file_path.open('w', encoding='utf-8') as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
-    print("配置文件已保存✅")
-
+        print("配置文件不存在，请执行bind_room进行绑定")
 if __name__ == "__main__":
     asyncio.run(main())
